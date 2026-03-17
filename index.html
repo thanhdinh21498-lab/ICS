@@ -238,6 +238,7 @@ select.finp option{background:var(--card2);color:var(--txt)}
   <div id="ntabs"></div>
   <div style="display:flex;align-items:center;gap:11px">
     <div id="rbadge"></div>
+    <div id="save-ind" style="font-size:9px;color:var(--ok);opacity:0;transition:opacity .3s;white-space:nowrap;font-family:monospace">✓ saved</div>
     <div class="uavatar" id="uavatar"></div>
     <div style="font-size:11px;color:var(--txt2)" id="uname"></div>
     <button class="lout" onclick="logout()">Sign Out</button>
@@ -1000,15 +1001,64 @@ let AUDIT=[
   {ts:'2026-03-11 09:20',user:'Accounting — Vo Thi Giang',role:'Head of Accounting',action:'Issued invoices',detail:'18 March invoices generated and sent',init:'VG',color:'#3AA87E'},
   {ts:'2026-03-10 14:15',user:'Director — Le Van Cuong',role:'Director',action:'Updated forecast',detail:'Bear scenario occupancy revised to 75%',init:'LC',color:'#6EA8FF'},
 ];
+// ════════════════════════════════════════════════
+//  LOCALSTORAGE PERSISTENCE
+// ════════════════════════════════════════════════
+const LS_KEY = 'leadvisors_ics_v1';
+
+function saveData(){
+  // Show brief save indicator
+  const ind=document.getElementById('save-ind');
+  if(ind){ind.style.opacity='1';clearTimeout(ind._t);ind._t=setTimeout(()=>ind.style.opacity='0',1200);}
+  try{
+    const payload={
+      STATE: STATE,
+      AUDIT: AUDIT,
+      BUILDING_CONFIG: BUILDING_CONFIG,
+      savedAt: new Date().toISOString()
+    };
+    localStorage.setItem(LS_KEY, JSON.stringify(payload));
+  }catch(e){ console.warn('Save failed:',e); }
+}
+
+function loadData(){
+  try{
+    const raw=localStorage.getItem(LS_KEY);
+    if(!raw) return false;
+    const payload=JSON.parse(raw);
+    if(payload.STATE){
+      // Merge each key so new default keys still appear
+      Object.keys(payload.STATE).forEach(k=>{ if(STATE[k]!==undefined) STATE[k]=payload.STATE[k]; });
+    }
+    if(payload.AUDIT && Array.isArray(payload.AUDIT)) AUDIT=payload.AUDIT;
+    if(payload.BUILDING_CONFIG) Object.assign(BUILDING_CONFIG, payload.BUILDING_CONFIG);
+    console.log('✓ Data loaded from localStorage ('+(raw.length/1024).toFixed(1)+'KB), saved '+payload.savedAt);
+    return true;
+  }catch(e){ console.warn('Load failed:',e); return false; }
+}
+
+function resetData(){
+  if(!confirm('Reset ALL data to factory defaults? This cannot be undone.')) return;
+  localStorage.removeItem(LS_KEY);
+  showToast('Data reset — reloading...','warn');
+  setTimeout(()=>location.reload(),1000);
+}
+
+// Auto-load on page start
+(function(){ loadData(); })();
+
+
 
 let CU=null; // current user
 let charts={};
 
 function addAudit(action,detail){
   if(!CU)return;
+  // saveData called at end of addAudit
   const now=new Date();
   const ts=now.toISOString().slice(0,16).replace('T',' ');
   AUDIT.unshift({ts,user:`${CU.role_obj.label.split(' ')[0]} — ${CU.name}`,role:CU.role_obj.label,action,detail,init:CU.init,color:CU.role_obj.color});
+  saveData();
 }
 
 // ════════════════════════════════════════════════
@@ -1070,6 +1120,7 @@ function buildShell(){
 }
 
 function goto(tid){
+  saveData();
   document.querySelectorAll('.ntab').forEach(b=>b.classList.toggle('on',b.dataset.tab===tid));
   const pc=document.getElementById('pages');
   pc.innerHTML='';
@@ -3123,7 +3174,13 @@ function rAdmin(el){
       </div>
     </div>
   </div>
-  <div id="admin-form"></div>`;
+  <div id="admin-form">
+  <div style="margin-top:20px;padding-top:16px;border-top:0.5px solid var(--b2)">
+    <div style="font-size:11px;color:var(--txt3);margin-bottom:8px">⚠️ Danger Zone</div>
+    <button class="fbtn fdng" onclick="resetData()">🗑 Reset All Data to Defaults</button>
+    <div style="font-size:10px;color:var(--txt3);margin-top:6px">Clears all saved changes and reloads factory data. Cannot be undone.</div>
+  </div>
+</div>`;
 }
 
 function editUserRole(idx){
@@ -3541,6 +3598,7 @@ function saveBuildingInfo(){
   if(g('bc-gfa'))    BUILDING_CONFIG.gfa=parseInt(g('bc-gfa'))||BUILDING_CONFIG.gfa;
   if(g('bc-svc'))    BUILDING_CONFIG.std_svc_fee=parseFloat(g('bc-svc'))||BUILDING_CONFIG.std_svc_fee;
   addAudit('Building info updated','Name: '+BUILDING_CONFIG.name+' · GFA: '+BUILDING_CONFIG.gfa+'m² · Svc fee: $'+BUILDING_CONFIG.std_svc_fee+'/m²');
+  saveData();
   showToast('✓ Building info saved','ok');
   goto('building_config');
 }
@@ -3560,6 +3618,7 @@ function addFloorNLA(){
   BUILDING_CONFIG.nla=Object.values(BUILDING_CONFIG.floor_areas).reduce((s,v)=>s+v,0);
   if(!ALL_FLOOR_IDS.includes(fid)) ALL_FLOOR_IDS.push(fid);
   addAudit('New floor added',fid+': '+nla+'m²');
+  saveData();
   showToast('✓ Floor '+fid+' added ('+nla.toLocaleString()+'m²) — re-renders everywhere','ok');
   goto('building_config');
 }
@@ -4078,6 +4137,7 @@ function updateInvoiceStatus(id,val){
   const inv=STATE.invoices.find(i=>i.id===id); if(!inv) return;
   const old=inv.status; inv.status=val;
   addAudit('Invoice status updated',id+': '+old+' → '+val);
+  saveData();
   showToast('Invoice '+id+' marked '+val,'ok');
   goto('accounting');
 }
